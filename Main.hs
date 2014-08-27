@@ -1,4 +1,6 @@
+{-# LANGUAGE DeriveDataTypeable  #-}
 {-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 import Control.Exception
@@ -7,10 +9,11 @@ import Data.Monoid
 import Data.Streaming.Network
 import Network.HTTP.ReverseProxy
 import Network.HTTP.Types
-import Network.Socket               (setSocketOption, sClose, SocketOption(ReuseAddr))
+import Network.Socket (setSocketOption, sClose, SocketOption(ReuseAddr))
 import Network.Wai
 import Network.Wai.Handler.Warp
-import System.IO.Unsafe             (unsafePerformIO)
+import System.Console.CmdArgs as CA
+import System.IO.Unsafe (unsafePerformIO)
 
 import qualified Data.ByteString.Lazy.Char8 as L8
 import qualified Data.IORef as I
@@ -19,11 +22,36 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 import qualified Network.HTTP.Client as HC
-import qualified System.Environment as SE
-import qualified System.Exit as SE
-import qualified System.IO as SIO
 import qualified System.Posix.Process as SPP
 import qualified System.Process as SP
+
+
+data Opts =
+  Opts { listen :: Int
+       , gateway:: String
+       } deriving(Show, Data, Typeable)
+
+cmdLineOpts :: Opts
+cmdLineOpts =
+  Opts { listen = 8080 &= help "local port to bind to, defaults to 8080"
+       , gateway = "" &= help "SSH gateway host"
+       } &= program "http-reverse-proxy-ssh-tunnel" &=
+                summary "A quick SSH tunnel hack for proxying HTTP service calls to another environment." &=
+                help "Usage: http-reverse-proxy-ssh-tunnel [--listen 8080] --gateway my.gateway.host" &=
+                details [ "Parses /etc/hosts, looking for entries below this comment"
+                        , ""
+                        , "# http-reverse-proxy-ssh-tunnel"
+                        , ""
+                        , "127.0.0.1 svc-something"
+                        , "127.0.0.1 svc-something-else"
+                        , ""
+                        , "Proxies calls like 'http://svc-something:LISTEN_PORT/' to another environment via SSH gateway."
+                        , ""
+                        , "On a Mac you can run it on a non-privileged port and forward port 80 connections to it with"
+                        , "$ sudo ipfw add 100 fwd 127.0.0.1,8080 tcp from any to any 80 in"
+                        , "$ sudo ipfw show"
+                        , ""
+                        ]
 
 
 nextPort :: I.IORef Int
@@ -45,7 +73,7 @@ getFreePort = do
 {-
  Parses /etc/hosts, looking for entries below this comment
 
-# PROXY TO PROD
+# http-reverse-proxy-ssh-tunnel
 
 127.0.0.1 svc-something
 127.0.0.1 svc-something-else
@@ -54,14 +82,14 @@ getFreePort = do
 getServiceNamesToProxy :: IO [T.Text]
 getServiceNamesToProxy = do
   etcHosts <- TIO.readFile "/etc/hosts"
-  let needle = "# PROXY TO PROD"
-  let (_, svcLines) = T.breakOnEnd needle etcHosts
-  let nonEmptySvcLines = filter (not . T.null) $ T.lines svcLines
+  let needle = "# http-reverse-proxy-ssh-tunnel"
+  let (_, svcLines) = T.breakOn needle etcHosts
+  let nonEmptySvcLines = filter (not . T.null) $ filter (not . T.isPrefixOf "#") $ map (T.strip) $ T.lines svcLines
   let svcNames = map ( last . (T.splitOn " ") . T.strip  ) nonEmptySvcLines
   if (null svcNames)
-    then error $ "Expected to find " <> (T.unpack needle) <> " in /etc/hosts, followed by \
-                                                  \127.0.0.1 svc-something \
-                                                  \127.0.0.1 svc-or-other"
+    then error $ "Expected to find " <> (T.unpack needle) <> " in /etc/hosts, followed by\n\
+                                                  \127.0.0.1 svc-something\n\
+                                                  \127.0.0.1 svc-or-other\n"
     else do TIO.putStrLn $ "Extracted from /etc/hosts: " <> (mconcat . intersperse ",") svcNames
             return svcNames
 
@@ -94,31 +122,24 @@ handler hostToLocalPort req = do
                        of Nothing   -> return $ WPRResponse $ responseLBS status404 [] $ "No mapping for " <> (L8.fromChunks [hostH]) <> ", have you listed it in /etc/hosts?"
                           Just port -> return $ WPRProxyDest $ ProxyDest "localhost" port
 
--- only care about gateway host for now
-parseArgs :: IO String
-parseArgs = do
-  args <- SE.getArgs
-  if (null args)
-    then do
-      pName <- SE.getProgName
-      SIO.hPutStrLn SIO.stderr $ "Usage: " <> pName <> " ssh.gateway.host.name"
-      SE.exitFailure
-    else
-      return $ head args
-
 
 main :: IO ()
 main = do
-  gwHost <- parseArgs
+  Opts{..} <- cmdArgs cmdLineOpts
   svcNames <- getServiceNamesToProxy
   hostToLocalPort <- assignRandomLocalPorts svcNames
-  startSSH gwHost hostToLocalPort
+
+  if (null gateway)
+    then error $ "\n\nGateway host is required!\nPlease re-run with --help to see all options.\n\n"
+    else return ()
+
+  startSSH gateway hostToLocalPort
 
   putStrLn "Starting proxy ..."
 
   man <- HC.newManager HC.defaultManagerSettings
   let app = waiProxyTo (handler hostToLocalPort) (defaultOnExc) man
-  run 8080 app
+  run listen app
   HC.closeManager man
 
 
