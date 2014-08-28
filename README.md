@@ -1,37 +1,39 @@
 http-reverse-proxy-ssh-tunnel
 ====
 
+```
+$ http-reverse-proxy-ssh-tunnel --help
+
 A quick SSH tunnel hack for proxying HTTP service calls to another environment.
-Based on http-reverse-proxy examples.
 
-The goal is to be able to execute curl commands with 'canonical' URLs locally
-in a development environment.
+http-reverse-proxy-ssh-tunnel [OPTIONS]
+  Usage: http-reverse-proxy-ssh-tunnel [--listen 8080] --gateway
+  my.gateway.host
 
-E.g to make
-```
-curl -v http://svc-something/
-curl -v http://svc-other/
-```
-work locally we point them to localhost with an /etc/hosts hack
+Common flags:
+  -l --listen=INT    local port to bind to, defaults to 8080
+  -g --gateway=ITEM  SSH gateway host
+  -? --help          Display help message
+  -V --version       Print version information
 
-```
-$ cat /etc/hosts
-........................
+Source: https://github.com/andreyk0/http-reverse-proxy-ssh-tunnel.git
+
+Proxies calls like 'http://svc-something:LISTEN_PORT/' to another environment
+via SSH gateway.
+
+This allows use of canonical service URLs in development environment.
+E.g. settings listed below should make 'http://svc-something/' work on local
+host.
+
+Parses /etc/hosts, looking for entries below this comment
 
 # http-reverse-proxy-ssh-tunnel
 
 127.0.0.1 svc-something
-127.0.0.1 svc-other
-```
+127.0.0.1 svc-something-else
 
-Start this process (on a non-privileged port, to avoid messing
-with sudo and SSH agent and settings)
-```
-http-reverse-proxy-ssh-tunnel --listen 8080 --gateway my.gateway.host
-```
-
-And add (Mac-specific) ipfw rules to send all port 80 traffic to 8080:
-```
-$ sudo ipfw add 100 fwd 127.0.0.1,8080 tcp from any to any 80 in
+On a Mac you can run it on a non-privileged port and forward port 80
+connections to it with
+$ sudo ipfw add 100 fwd '127.0.0.1,8080' tcp from 127.0.0.1 to any 80 in
 $ sudo ipfw show
 ```

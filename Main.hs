@@ -38,17 +38,22 @@ cmdLineOpts =
        } &= program "http-reverse-proxy-ssh-tunnel" &=
                 summary "A quick SSH tunnel hack for proxying HTTP service calls to another environment." &=
                 help "Usage: http-reverse-proxy-ssh-tunnel [--listen 8080] --gateway my.gateway.host" &=
-                details [ "Parses /etc/hosts, looking for entries below this comment"
+                details [ "Source: https://github.com/andreyk0/http-reverse-proxy-ssh-tunnel.git"
+                        , ""
+                        , "Proxies calls like 'http://svc-something:LISTEN_PORT/' to another environment via SSH gateway."
+                        , ""
+                        , "This allows use of canonical service URLs in development environment."
+                        , "E.g. settings listed below should make 'http://svc-something/' work on local host."
+                        , ""
+                        , "Parses /etc/hosts, looking for entries below this comment"
                         , ""
                         , "# http-reverse-proxy-ssh-tunnel"
                         , ""
                         , "127.0.0.1 svc-something"
                         , "127.0.0.1 svc-something-else"
                         , ""
-                        , "Proxies calls like 'http://svc-something:LISTEN_PORT/' to another environment via SSH gateway."
-                        , ""
                         , "On a Mac you can run it on a non-privileged port and forward port 80 connections to it with"
-                        , "$ sudo ipfw add 100 fwd 127.0.0.1,8080 tcp from any to any 80 in"
+                        , "$ sudo ipfw add 100 fwd '127.0.0.1,8080' tcp from 127.0.0.1 to any 80 in"
                         , "$ sudo ipfw show"
                         , ""
                         ]
